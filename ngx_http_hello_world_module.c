@@ -19,7 +19,7 @@ static ngx_command_t ngx_http_hello_world_commands[] = {
     // 配置指令的名称。
     ngx_string("hello_world"),
     // 该配置的类型，其实更准确一点说，是该配置指令属性的集合。nginx提供了很多预定义的属性值（一些宏定义），通过逻辑或运算符可组合在一起，形成对这个配置指令的详细的说明。下面列出可在这里使用的预定义属性值及说明。
-    NGX_HTTP_LOC_CONF | NGX_CONF_TAKE1,
+    NGX_HTTP_LOC_CONF | NGX_CONF_NOARGS,
     // 这是一个函数指针，当nginx在解析配置的时候，如果遇到这个配置指令，将会把读取到的值传递给这个函数进行分解处理。因为具体每个配置指令的值如何处理，只有定义这个配置指令的人是最清楚的。来看一下这个函数指针要求的函数原型。
     ngx_http_hello_world,
     // 该字段被NGX_HTTP_MODULE类型模块所用 (我们编写的基本上都是NGX_HTTP_MOUDLE，只有一些nginx核心模块是非NGX_HTTP_MODULE)，该字段指定当前配置项存储的内存位置。实际上是使用哪个内存池的问题。因为http模块对所有http模块所要保存的配置信息，划分了main, server和location三个地方进行存储，每个地方都有一个内存池用来分配存储这些信息的内存。这里可能的值为 NGX_HTTP_MAIN_CONF_OFFSET、NGX_HTTP_SRV_CONF_OFFSET或NGX_HTTP_LOC_CONF_OFFSET。当然也可以直接置为0，就是NGX_HTTP_MAIN_CONF_OFFSET。
@@ -67,6 +67,11 @@ static char *ngx_http_hello_world(ngx_conf_t* cf, ngx_command_t* cmd, void* conf
   return NGX_CONF_OK;
 }
 
+// url: /api/private/1/test.jpg, user_id: 1
+// 1. 请求体携带 header
+// 2. 解析请求体加密串
+// 3. 加密串的user_id == url的user_id
+// 相同，返回某路径下的图片资源
 static ngx_int_t ngx_http_hello_world_handler(ngx_http_request_t* r) {
     //必须是GET或者HEAD方法，否则返回405 Not Allowed
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)))
@@ -86,6 +91,7 @@ static ngx_int_t ngx_http_hello_world_handler(ngx_http_request_t* r) {
     ngx_str_t type = ngx_string("text/plain");
     //返回的包体内容
     ngx_str_t response = ngx_string("Hello World!");
+
     //设置返回状态码
     r->headers_out.status = NGX_HTTP_OK;
     //响应包是有包体内容的，所以需要设置Content-Length长度
@@ -107,6 +113,7 @@ static ngx_int_t ngx_http_hello_world_handler(ngx_http_request_t* r) {
     {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
+
     //将Hello World拷贝到ngx_buf_t指向的内存中
     ngx_memcpy(b->pos, response.data, response.len);
     //注意，一定要设置好last指针
