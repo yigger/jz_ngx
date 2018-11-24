@@ -68,7 +68,7 @@ static char *ngx_http_hello_world(ngx_conf_t* cf, ngx_command_t* cmd, void* conf
 }
 
 static ngx_int_t ngx_http_hello_world_handler(ngx_http_request_t* r) {
-    //必须是GET或者HEAD方法，否则返回405 Not Allowed
+    //必须是GET或者HEAD方法，否则返回405 Not Allowed 
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)))
     {
         return NGX_HTTP_NOT_ALLOWED;
@@ -117,7 +117,7 @@ static ngx_int_t ngx_http_hello_world_handler(ngx_http_request_t* r) {
     b->last_buf = 1;
 
     //构造发送时的ngx_chain_t结构体
-    ngx_chain_t     out;
+    ngx_chain_t out;
     //赋值ngx_buf_t
     out.buf = b;
     //设置next为NULL
