@@ -54,16 +54,24 @@ ngx_module_t ngx_http_private_image_module = {
 	NGX_MODULE_V1_PADDING
 };
 
+// url: /api/private/1/test.jpg, user_id: 1
+// 1. 请求体携带 header
+// 2. 解析请求体加密串
+// 3. 加密串的user_id == url的user_id
+// 相同，返回某路径下的图片资源
 static ngx_int_t
 ngx_http_private_image_handle(ngx_http_request_t *r)
 {
 	ngx_str_t 		path;
 	size_t 			root;
 	u_char 			*last;
-
+	ngx_open_file_info_t       of;
+	ngx_http_core_loc_conf_t  *clcf;
+	ngx_buf_t                 *b;
+	ngx_chain_t                out;
 
 	// 仅允许 GET/HEAD 请求
-	if (!(r->method) & (NGX_HTTP_GET|NGX_HTTP_HEAD)) {
+	if (!(r->method & (NGX_HTTP_GET|NGX_HTTP_HEAD))) {
 		return NGX_HTTP_NOT_ALLOWED;
 	}
 
@@ -77,8 +85,44 @@ ngx_http_private_image_handle(ngx_http_request_t *r)
 		return NGX_HTTP_NOT_ALLOWED;
 	}
 
-	
+	clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
+	ngx_memzero(&of, sizeof(ngx_open_file_info_t));
+	of.read_ahead = clcf->read_ahead;
+	of.directio = clcf->directio;
+	of.valid = clcf->open_file_cache_valid;
+	of.min_uses = clcf->open_file_cache_min_uses;
+	of.errors = clcf->open_file_cache_errors;
+	of.events = clcf->open_file_cache_events;
 
+	ngx_open_cached_file(clcf->open_file_cache, &path, &of, r->pool);
+
+
+	r->headers_out.status = NGX_HTTP_OK;
+	r->headers_out.content_length_n = of.size;
+	r->headers_out.last_modified_time = of.mtime;
+	r->allow_ranges = 1;
+	
+	b = ngx_calloc_buf(r->pool);
+	b->file = ngx_pcalloc(r->pool, sizeof(ngx_file_t));
+	if (b->file == NULL) {
+		return NGX_HTTP_INTERNAL_SERVER_ERROR;
+	}
+
+	b->file_pos = 0;
+	b->file_last = of.size;
+
+	b->in_file = b->file_last ? 1: 0;
+	b->last_buf = (r == r->main) ? 1: 0;
+	b->last_in_chain = 1;
+
+	b->file->fd = of.fd;
+	b->file->name = path;
+	b->file->directio = of.is_directio;
+
+	out.buf = b;
+	out.next = NULL;
+
+	return ngx_http_output_filter(r, &out);
 }
 
 static ngx_int_t

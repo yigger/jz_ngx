@@ -67,11 +67,6 @@ static char *ngx_http_hello_world(ngx_conf_t* cf, ngx_command_t* cmd, void* conf
   return NGX_CONF_OK;
 }
 
-// url: /api/private/1/test.jpg, user_id: 1
-// 1. 请求体携带 header
-// 2. 解析请求体加密串
-// 3. 加密串的user_id == url的user_id
-// 相同，返回某路径下的图片资源
 static ngx_int_t ngx_http_hello_world_handler(ngx_http_request_t* r) {
     //必须是GET或者HEAD方法，否则返回405 Not Allowed
     if (!(r->method & (NGX_HTTP_GET | NGX_HTTP_HEAD)))
