@@ -16,7 +16,7 @@ static char* ngx_http_private_image_merge_loc_conf(ngx_conf_t* cf, void* parent,
 
 static ngx_int_t ngx_http_private_image_handler(ngx_http_request_t* r);
 
-static ngx_int_t curl_jz();
+static ngx_int_t curl_jz(ngx_http_request_t* request, ngx_log_t **log, ngx_str_t **out);
 
 static ngx_command_t ngx_http_private_image_commands[] = {
   {
@@ -76,15 +76,12 @@ static ngx_int_t ngx_http_private_image_handler(ngx_http_request_t* r) {
     ngx_open_file_info_t       of;
     ngx_log_t                 *log;
     ngx_int_t                  rc;
+    ngx_str_t                  *resp;
     ngx_str_t path = ngx_string("/home/young/test.png");
-    
-    curl_jz();
 
     log = r->connection->log;
 
-    ngx_log_debug1(NGX_LOG_DEBUG_HTTP, log, 0,
-                   "private image http filename: \"%s\"", path.data);
-
+    curl_jz(r, &log, &resp);
 
 	clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
@@ -130,7 +127,7 @@ static ngx_int_t ngx_http_private_image_handler(ngx_http_request_t* r) {
 	b->file->name = path;
 	b->file->directio = of.is_directio;
 
-    ngx_chain_t out;
+  ngx_chain_t out;
 	out.buf = b;
 	out.next = NULL;
 
@@ -165,55 +162,39 @@ static char* ngx_http_private_image_merge_loc_conf(ngx_conf_t* cf, void* parent,
 }
 
 // 以下方法是获取验证数据
-struct string {
-  char *ptr;
-  size_t len;
-};
-
-void init_string(struct string *s) {
-  s->len = 0;
-  s->ptr = malloc(s->len+1);
-  if (s->ptr == NULL) {
-    fprintf(stderr, "malloc() failed\n");
-  }
-  s->ptr[0] = '\0';
-}
-
-size_t writefunc(void *ptr, size_t size, size_t nmemb, struct string *s)
+size_t getResponse(void* ptr, size_t size, size_t nmemb, ngx_str_t *res) // struct string *s
 {
-  size_t new_len = s->len + size*nmemb;
-  s->ptr = realloc(s->ptr, new_len+1);
-  if (s->ptr == NULL) {
-    fprintf(stderr, "realloc() failed\n");
-    exit(EXIT_FAILURE);
-  }
+    size_t new_len = res->len + size*nmemb;
+    res->data = realloc(res->data, new_len + 1);
+    if (res->data == NULL) {
+        return NGX_ERROR;
+    }
+    ngx_memcpy(res->data, ptr, size*nmemb);
+    res->data[new_len] = '\0';
+    res->len = new_len;
 
-  memcpy(s->ptr+s->len, ptr, size*nmemb);
-
-  s->ptr[new_len] = '\0';
-  s->len = new_len;
-
-  return size*nmemb;
+    return size*nmemb;
 }
 
-static ngx_int_t curl_jz() {
+static ngx_int_t curl_jz(ngx_http_request_t* request, ngx_log_t **log, ngx_str_t **out) {
     CURL *curl;
-    // CURLcode res;
-
     curl = curl_easy_init();
     if(curl) {
-        struct string s;
-        init_string(&s);
-
+        ngx_str_t res = ngx_null_string;
         curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000");
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writefunc);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &s);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &res);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, getResponse);
         curl_easy_perform(curl);
         
-        // char  *test = "{\"msg\":\"Welcome to JieZhang\"}";
-        // cJSON *root = cJSON_Parse(test);
-        // cJSON *msg  = cJSON_GetObjectItem(root, "msg");
-        // free(s.ptr);
+        if (res.data == NULL) {
+            return NGX_OK;
+        }
+
+        cJSON* parse = cJSON_Parse((char *)res.data);
+        cJSON* msg   = cJSON_GetObjectItem(parse, "msg");
+        printf("%s", msg->valuestring);
+
+        free(res.data);
         /* always cleanup */
         curl_easy_cleanup(curl);
     }
