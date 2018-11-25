@@ -4,6 +4,9 @@
 #include <curl/curl.h>
 #include "cJSON.h"
 
+#define  AUTHORIZE_OK          0
+#define  AUTHORIZE_FAIL       -1
+
 typedef struct {
   ngx_str_t output_words;
 } ngx_http_private_image_loc_conf_t;
@@ -16,7 +19,7 @@ static char* ngx_http_private_image_merge_loc_conf(ngx_conf_t* cf, void* parent,
 
 static ngx_int_t ngx_http_private_image_handler(ngx_http_request_t* r);
 
-static ngx_int_t curl_jz(ngx_http_request_t* request, ngx_log_t **log, ngx_str_t **out);
+static ngx_int_t check_authorize(ngx_log_t **log);
 
 static ngx_command_t ngx_http_private_image_commands[] = {
   {
@@ -63,7 +66,9 @@ ngx_module_t ngx_http_private_image_module  = {
   NGX_MODULE_V1_PADDING
 };
 
-static char *ngx_http_private_image(ngx_conf_t* cf, ngx_command_t* cmd, void* conf) {
+static char 
+*ngx_http_private_image(ngx_conf_t* cf, ngx_command_t* cmd, void* conf)
+{
   ngx_http_core_loc_conf_t *clcf;
   clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
   clcf->handler = ngx_http_private_image_handler;
@@ -71,22 +76,28 @@ static char *ngx_http_private_image(ngx_conf_t* cf, ngx_command_t* cmd, void* co
   return NGX_CONF_OK;
 }
 
-static ngx_int_t ngx_http_private_image_handler(ngx_http_request_t* r) {
+static ngx_int_t
+ngx_http_private_image_handler(ngx_http_request_t* r)
+{
     ngx_http_core_loc_conf_t  *clcf;
     ngx_open_file_info_t       of;
     ngx_log_t                 *log;
     ngx_int_t                  rc;
-    ngx_str_t                  *resp;
+    
+    printf("%s\n", r->uri->data);
     ngx_str_t path = ngx_string("/home/young/test.png");
 
     log = r->connection->log;
-
-    curl_jz(r, &log, &resp);
+    
+    if (check_authorize(&log) == AUTHORIZE_OK) {
+        printf("success authorize");
+    } else {
+        // 验证失败，直接返回错误内容
+        printf("authorize FAIL");
+    }
 
 	clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
-
 	ngx_memzero(&of, sizeof(ngx_open_file_info_t));
-
 	of.read_ahead = clcf->read_ahead;
 	of.directio = clcf->directio;
 	of.valid = clcf->open_file_cache_valid;
@@ -104,7 +115,7 @@ static ngx_int_t ngx_http_private_image_handler(ngx_http_request_t* r) {
     ngx_str_t type = ngx_string("image/png");
 	r->headers_out.status = NGX_HTTP_OK;
 	r->headers_out.content_length_n = of.size;
-	// r->headers_out.last_modified_time = of.mtime;
+	r->headers_out.last_modified_time = of.mtime;
     r->headers_out.content_type = type;
 	r->allow_ranges = 1;
 
@@ -127,7 +138,7 @@ static ngx_int_t ngx_http_private_image_handler(ngx_http_request_t* r) {
 	b->file->name = path;
 	b->file->directio = of.is_directio;
 
-  ngx_chain_t out;
+    ngx_chain_t out;
 	out.buf = b;
 	out.next = NULL;
 
@@ -140,7 +151,9 @@ static ngx_int_t ngx_http_private_image_handler(ngx_http_request_t* r) {
 	return ngx_http_output_filter(r, &out);
 }
 
-static void* ngx_http_private_image_create_loc_conf(ngx_conf_t* cf) {
+static void*
+ngx_http_private_image_create_loc_conf(ngx_conf_t* cf)
+{
     ngx_http_private_image_loc_conf_t* conf;
  
     conf = ngx_pcalloc(cf->pool, sizeof(ngx_http_private_image_loc_conf_t));
@@ -153,7 +166,8 @@ static void* ngx_http_private_image_create_loc_conf(ngx_conf_t* cf) {
     return conf;
 }
  
-static char* ngx_http_private_image_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child) 
+static char*
+ngx_http_private_image_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child) 
 {
     ngx_http_private_image_loc_conf_t* prev = parent;
     ngx_http_private_image_loc_conf_t* conf = child;
@@ -162,7 +176,8 @@ static char* ngx_http_private_image_merge_loc_conf(ngx_conf_t* cf, void* parent,
 }
 
 // 以下方法是获取验证数据
-size_t getResponse(void* ptr, size_t size, size_t nmemb, ngx_str_t *res) // struct string *s
+size_t
+getResponse(void* ptr, size_t size, size_t nmemb, ngx_str_t *res) // struct string *s
 {
     size_t new_len = res->len + size*nmemb;
     res->data = realloc(res->data, new_len + 1);
@@ -176,10 +191,12 @@ size_t getResponse(void* ptr, size_t size, size_t nmemb, ngx_str_t *res) // stru
     return size*nmemb;
 }
 
-static ngx_int_t curl_jz(ngx_http_request_t* request, ngx_log_t **log, ngx_str_t **out) {
+static ngx_int_t
+check_authorize(ngx_log_t **log)
+{
     CURL *curl;
     curl = curl_easy_init();
-    if(curl) {
+    if (curl) {
         ngx_str_t res = ngx_null_string;
         curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000");
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &res);
@@ -187,16 +204,18 @@ static ngx_int_t curl_jz(ngx_http_request_t* request, ngx_log_t **log, ngx_str_t
         curl_easy_perform(curl);
         
         if (res.data == NULL) {
-            return NGX_OK;
+            return AUTHORIZE_FAIL;
         }
 
         cJSON* parse = cJSON_Parse((char *)res.data);
         cJSON* msg   = cJSON_GetObjectItem(parse, "msg");
-        printf("%s", msg->valuestring);
-
         free(res.data);
-        /* always cleanup */
         curl_easy_cleanup(curl);
+
+        if (ngx_strcmp(msg->valuestring, "200") == 0) {
+        //     return AUTHORIZE_OK;
+        }
+        return AUTHORIZE_OK;
     }
-    return NGX_OK;
+    return AUTHORIZE_FAIL;
 }
