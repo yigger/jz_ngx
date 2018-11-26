@@ -27,6 +27,7 @@ make && make install
 ### 使用方法
 ```
 location ~ ^/private/(.*)\.(jpg|jpeg|png|gif)$ {
+  root /var/html/example_project; # 项目路径
   private_image;
 }
 ```
@@ -37,8 +38,8 @@ location ~ ^/private/(.*)\.(jpg|jpeg|png|gif)$ {
 2. 修改 nginx.conf，加上以下配置项
 ```
 ...
-daemon off; // 关闭守护进程
-master_process off; // 只运行主进程来服务
+daemon off; # 关闭守护进程
+master_process off; # 只运行主进程来服务
 ...
 ```
 
