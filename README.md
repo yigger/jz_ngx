@@ -40,6 +40,7 @@ location ~ ^/private/(.*)\.(jpg|jpeg|png|gif)$ {
 ...
 daemon off; # 关闭守护进程
 master_process off; # 只运行主进程来服务
+error_log  ~/logs/error.log debug; # debug 日志
 ...
 ```
 
