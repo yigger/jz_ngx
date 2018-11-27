@@ -19,7 +19,7 @@ static char* ngx_http_private_image_merge_loc_conf(ngx_conf_t* cf, void* parent,
 
 static ngx_int_t ngx_http_private_image_handler(ngx_http_request_t* r);
 
-static ngx_int_t check_authorize(ngx_log_t **log);
+static ngx_int_t check_authorize();
 
 static ngx_command_t ngx_http_private_image_commands[] = {
     {
@@ -99,20 +99,19 @@ ngx_http_private_image_handler(ngx_http_request_t* r)
         return NGX_DECLINED;
     }
 
+    // 进行权限校验
+    if (check_authorize() == AUTHORIZE_FAIL) {
+        return NGX_HTTP_NOT_ALLOWED;
+    }
+
     // 转换为磁盘路径 path
     last = ngx_http_map_uri_to_path(r, &path, &root, 0);
     if (last == NULL) {
         return NGX_HTTP_INTERNAL_SERVER_ERROR;
     }
-    
+
     // 初始化 Log
     log = r->connection->log;
-    
-    // 进行权限校验
-    if (check_authorize(&log) == AUTHORIZE_FAIL) {
-    //     ngx_log_debug(NGX_LOG_DEBUG_HTTP, log, 0, "权限校验失败");
-    //     return NGX_HTTP_NOT_ALLOWED;
-    }
 
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
@@ -211,30 +210,33 @@ getResponse(void* ptr, size_t size, size_t nmemb, ngx_str_t *res) // struct stri
 }
 
 static ngx_int_t
-check_authorize(ngx_log_t **log)
+check_authorize()
 {
     CURL *curl;
     curl = curl_easy_init();
+    ngx_int_t result = AUTHORIZE_FAIL;
     if (curl) {
         ngx_str_t res = ngx_null_string;
         curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000");
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &res);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, getResponse);
         curl_easy_perform(curl);
-        
+
         if (res.data == NULL) {
-            return AUTHORIZE_FAIL;
+            result = AUTHORIZE_FAIL;
+        } else {
+            cJSON* parse = cJSON_Parse((char *)res.data);
+            cJSON* status = cJSON_GetObjectItem(parse, "status");
+            result = AUTHORIZE_OK;
+            if (status->valuestring != NULL && ngx_strcmp(status->valuestring, "200") == 0) {
+                result = AUTHORIZE_OK;
+            }
+            cJSON_free(parse);
+            cJSON_free(status);
         }
 
-        cJSON* parse = cJSON_Parse((char *)res.data);
-        cJSON* msg   = cJSON_GetObjectItem(parse, "msg");
         free(res.data);
         curl_easy_cleanup(curl);
-
-        if (ngx_strcmp(msg->valuestring, "200") == 0) {
-        //     return AUTHORIZE_OK;
-        }
-        return AUTHORIZE_OK;
     }
-    return AUTHORIZE_FAIL;
+    return result;
 }
