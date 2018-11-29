@@ -19,9 +19,9 @@ static char* ngx_http_private_image_merge_loc_conf(ngx_conf_t* cf, void* parent,
 
 static ngx_int_t ngx_http_private_image_handler(ngx_http_request_t* r);
 
-static ngx_int_t check_authorize(ngx_http_request_t* r, ngx_str_t arg);
+static ngx_str_t get_key_header (ngx_http_request_t* r, ngx_str_t header_name);
 
-static ngx_str_t get_key_header (ngx_http_request_t* r);
+static ngx_int_t check_authorize(ngx_http_request_t* r, char *header);
 
 static ngx_command_t ngx_http_private_image_commands[] = {
     {
@@ -98,24 +98,35 @@ ngx_http_private_image_handler(ngx_http_request_t* r)
 
     // 请求最后 / 说明不是文件 拒绝响应
     if (r->uri.data[r->uri.len - 1] == '/') {
-        return NGX_DECLINED;
+        return NGX_HTTP_NOT_ALLOWED;
     }
 
     // 请求参数 HEDAER
-    ngx_str_t arg = get_key_header(r);
-    if (arg.data == NULL) {
-        return NGX_DECLINED;
+    ngx_str_t header_key = ngx_string("WX-KEY");
+    ngx_str_t header_val = get_key_header(r, header_key);
+    if (header_val.data == NULL) {
+        return NGX_HTTP_FORBIDDEN;
     }
 
+    // 字符串拼接
+    char *header;
+    ngx_int_t new_len = header_key.len + header_val.len + 2;
+    header = malloc(new_len);
+    ngx_memcpy(header, header_key.data, header_key.len);
+    strcat(header, ":");
+    strcat(header, (char *)header_val.data);
+
     // 进行权限校验
-    if (check_authorize(r, arg) == AUTHORIZE_FAIL) {
-        return NGX_HTTP_NOT_ALLOWED;
+    if (check_authorize(r, header) == AUTHORIZE_FAIL) {
+        return NGX_HTTP_FORBIDDEN;
     }
+
+    free(header);
 
     // 转换为磁盘路径 path
     last = ngx_http_map_uri_to_path(r, &path, &root, 0);
     if (last == NULL) {
-        return NGX_HTTP_INTERNAL_SERVER_ERROR;
+        return NGX_HTTP_NOT_FOUND;
     }
 
     // 初始化 Log
@@ -201,38 +212,45 @@ ngx_http_private_image_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child)
     return NGX_CONF_OK;
 }
 
-// 以下方法是获取验证数据
 size_t
-getResponse(void* ptr, size_t size, size_t nmemb, ngx_str_t *res) // struct string *s
+getResponse(void* ptr, size_t size, size_t nmemb, ngx_str_t *response) // struct string *s
 {
-    size_t new_len = res->len + size*nmemb;
-    res->data = realloc(res->data, new_len + 1);
-    if (res->data == NULL) {
+    size_t new_len = response->len + size*nmemb;
+    response->data = realloc(response->data, new_len + 1);
+    if (response->data == NULL) {
         return NGX_ERROR;
     }
-    ngx_memcpy(res->data, ptr, size*nmemb);
-    res->data[new_len] = '\0';
-    res->len = new_len;
+    ngx_memcpy(response->data, ptr, size*nmemb);
+    response->data[new_len] = '\0';
+    response->len = new_len;
 
     return size*nmemb;
 }
 
 static ngx_int_t
-check_authorize(ngx_http_request_t* r, ngx_str_t arg)
+check_authorize(ngx_http_request_t* r, char *header)
 {
-    CURL *curl;
-    curl = curl_easy_init();
-    ngx_int_t result = AUTHORIZE_FAIL;
-    if (curl) {
-        ngx_str_t res = ngx_null_string;
-        ngx_str_t path = ngx_string("http://localhost:3000");
-        curl_easy_setopt(curl, CURLOPT_URL, path.data);
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &res);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, getResponse);
-        curl_easy_perform(curl);
+    ngx_int_t          result   = AUTHORIZE_FAIL;
+    ngx_str_t          response = ngx_null_string;
+    CURLcode           curl_code;
+    CURL              *curl;
+    struct curl_slist *chunk    = NULL;
 
-        if (res.data != NULL) {
-            cJSON* parse = cJSON_Parse((char *)res.data);
+    curl = curl_easy_init();
+    if (curl) {
+        // set request url and set response
+        curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000");
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, getResponse);
+
+        // set request headers
+        chunk = curl_slist_append(chunk, header);
+        curl_code = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+        curl_code = curl_easy_perform(curl);
+
+        if (curl_code == CURLE_OK && response.data != NULL) {
+            // get response json and check
+            cJSON* parse = cJSON_Parse((char *)response.data);
             cJSON* status = cJSON_GetObjectItem(parse, "status");
             if (status->valuestring != NULL && ngx_strcmp(status->valuestring, "200") == 0) {
                 result = AUTHORIZE_OK;
@@ -241,19 +259,26 @@ check_authorize(ngx_http_request_t* r, ngx_str_t arg)
             cJSON_free(status);
         }
 
-        free(res.data);
+        // free(header->data);
         curl_easy_cleanup(curl);
+        curl_slist_free_all(chunk);
     }
+
     return result;
 }
 
 static ngx_str_t
-get_key_header (ngx_http_request_t* r) {
+get_key_header (ngx_http_request_t* r, ngx_str_t header_name) {
     ngx_list_part_t *part = &r->headers_in.headers.part;
     ngx_table_elt_t *header = part->elts;
     ngx_str_t result = ngx_null_string;
     unsigned int i = 0;
-    // 涉及链表和 ngx_table_elt_t 的用法
+
+    // ngx_int_t new_len = header.len + arg.len + 1;
+    // header.data = realloc(r->pool, new_len);
+    // ngx_memcpy(header.data, arg.data, arg.len);
+    // header.len = new_len;
+
     for(;;i ++) {
         if (i >= part->nelts) {
             if ((part->next == NULL)) {
@@ -268,7 +293,7 @@ get_key_header (ngx_http_request_t* r) {
             continue;
         }
 
-        if (0 == ngx_strncasecmp(header[i].key.data, (u_char*) "wechat", header[i].key.len)) {
+        if (0 == ngx_strncasecmp(header[i].key.data, header_name.data, header[i].key.len)) {
             return header[i].value;
         }
     }
