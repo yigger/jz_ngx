@@ -19,7 +19,9 @@ static char* ngx_http_private_image_merge_loc_conf(ngx_conf_t* cf, void* parent,
 
 static ngx_int_t ngx_http_private_image_handler(ngx_http_request_t* r);
 
-static ngx_int_t check_authorize(ngx_http_request_t* r);
+static ngx_int_t check_authorize(ngx_http_request_t* r, ngx_str_t arg);
+
+static ngx_str_t get_key_header (ngx_http_request_t* r);
 
 static ngx_command_t ngx_http_private_image_commands[] = {
     {
@@ -99,8 +101,14 @@ ngx_http_private_image_handler(ngx_http_request_t* r)
         return NGX_DECLINED;
     }
 
+    // 请求参数 HEDAER
+    ngx_str_t arg = get_key_header(r);
+    if (arg.data == NULL) {
+        return NGX_DECLINED;
+    }
+
     // 进行权限校验
-    if (check_authorize(r) == AUTHORIZE_FAIL) {
+    if (check_authorize(r, arg) == AUTHORIZE_FAIL) {
         return NGX_HTTP_NOT_ALLOWED;
     }
 
@@ -210,7 +218,7 @@ getResponse(void* ptr, size_t size, size_t nmemb, ngx_str_t *res) // struct stri
 }
 
 static ngx_int_t
-check_authorize(ngx_http_request_t* r)
+check_authorize(ngx_http_request_t* r, ngx_str_t arg)
 {
     CURL *curl;
     curl = curl_easy_init();
@@ -218,16 +226,12 @@ check_authorize(ngx_http_request_t* r)
     if (curl) {
         ngx_str_t res = ngx_null_string;
         ngx_str_t path = ngx_string("http://localhost:3000");
-        // TODO: 拼接参数
-
         curl_easy_setopt(curl, CURLOPT_URL, path.data);
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &res);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, getResponse);
         curl_easy_perform(curl);
 
-        if (res.data == NULL) {
-            result = AUTHORIZE_FAIL;
-        } else {
+        if (res.data != NULL) {
             cJSON* parse = cJSON_Parse((char *)res.data);
             cJSON* status = cJSON_GetObjectItem(parse, "status");
             if (status->valuestring != NULL && ngx_strcmp(status->valuestring, "200") == 0) {
@@ -240,5 +244,34 @@ check_authorize(ngx_http_request_t* r)
         free(res.data);
         curl_easy_cleanup(curl);
     }
+    return result;
+}
+
+static ngx_str_t
+get_key_header (ngx_http_request_t* r) {
+    ngx_list_part_t *part = &r->headers_in.headers.part;
+    ngx_table_elt_t *header = part->elts;
+    ngx_str_t result = ngx_null_string;
+    unsigned int i = 0;
+    // 涉及链表和 ngx_table_elt_t 的用法
+    for(;;i ++) {
+        if (i >= part->nelts) {
+            if ((part->next == NULL)) {
+                break;
+            }
+            part = part->next;
+            header = part->elts;
+            i = 0;
+        }
+
+        if (header[i].hash == 0) {
+            continue;
+        }
+
+        if (0 == ngx_strncasecmp(header[i].key.data, (u_char*) "wechat", header[i].key.len)) {
+            return header[i].value;
+        }
+    }
+
     return result;
 }
