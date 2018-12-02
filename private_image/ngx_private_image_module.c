@@ -106,22 +106,23 @@ ngx_http_private_image_handler(ngx_http_request_t* r)
     ngx_str_t header_val = get_key_header(r, header_key);
     if (header_val.data == NULL) {
         return NGX_HTTP_FORBIDDEN;
+    } else {
+        // 字符串拼接
+        char *header;
+        ngx_int_t new_len = header_key.len + header_val.len + 2;
+        header = malloc(new_len);
+        ngx_memcpy(header, header_key.data, header_key.len);
+        strcat(header, ":");
+        strcat(header, (char *)header_val.data);
+
+        // 进行权限校验
+        if (check_authorize(r, header) == AUTHORIZE_FAIL) {
+            free(header);
+            return NGX_HTTP_FORBIDDEN;
+        }
+
+        free(header);
     }
-
-    // 字符串拼接
-    char *header;
-    ngx_int_t new_len = header_key.len + header_val.len + 2;
-    header = malloc(new_len);
-    ngx_memcpy(header, header_key.data, header_key.len);
-    strcat(header, ":");
-    strcat(header, (char *)header_val.data);
-
-    // 进行权限校验
-    if (check_authorize(r, header) == AUTHORIZE_FAIL) {
-        return NGX_HTTP_FORBIDDEN;
-    }
-
-    free(header);
 
     // 转换为磁盘路径 path
     last = ngx_http_map_uri_to_path(r, &path, &root, 0);
@@ -239,7 +240,7 @@ check_authorize(ngx_http_request_t* r, char *header)
     curl = curl_easy_init();
     if (curl) {
         // set request url and set response
-        curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:3000");
+        curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:1323");
         curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
         curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, getResponse);
 
@@ -273,11 +274,6 @@ get_key_header (ngx_http_request_t* r, ngx_str_t header_name) {
     ngx_table_elt_t *header = part->elts;
     ngx_str_t result = ngx_null_string;
     unsigned int i = 0;
-
-    // ngx_int_t new_len = header.len + arg.len + 1;
-    // header.data = realloc(r->pool, new_len);
-    // ngx_memcpy(header.data, arg.data, arg.len);
-    // header.len = new_len;
 
     for(;;i ++) {
         if (i >= part->nelts) {
