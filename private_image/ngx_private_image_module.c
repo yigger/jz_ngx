@@ -237,18 +237,35 @@ check_authorize(ngx_http_request_t* r, char *header)
     CURL              *curl;
     struct curl_slist *chunk    = NULL;
 
+    char prefix[] = "source_url=";
+    char *post_field = malloc(strlen(prefix)+r->uri.len+200);    
+    strcpy(post_field, prefix);
+    strcat(post_field, (char *)r->uri.data);
+
     curl = curl_easy_init();
     if (curl) {
         // set request url and set response
         curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:1323");
-        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
-        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, getResponse);
+ 
+        /* Now specify we want to POST data */ 
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_field);
+
+        /* we want to use our own read function */ 
+        curl_easy_setopt(curl, CURLOPT_READFUNCTION, getResponse);
+    
+        /* pointer to pass to our read function */ 
+        curl_easy_setopt(curl, CURLOPT_READDATA, &response);
+    
+        /* get verbose debug output please */ 
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
 
         // set request headers
         chunk = curl_slist_append(chunk, header);
-        curl_code = curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
-        curl_code = curl_easy_perform(curl);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
 
+        curl_code = curl_easy_perform(curl);
         if (curl_code == CURLE_OK && response.data != NULL) {
             // get response json and check
             cJSON* parse = cJSON_Parse((char *)response.data);
@@ -260,7 +277,7 @@ check_authorize(ngx_http_request_t* r, char *header)
             cJSON_free(status);
         }
 
-        // free(header->data);
+        free(post_field);
         curl_easy_cleanup(curl);
         curl_slist_free_all(chunk);
     }
