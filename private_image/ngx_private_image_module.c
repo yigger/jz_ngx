@@ -246,9 +246,13 @@ check_authorize(ngx_http_request_t* r, char *header)
     if (curl) {
         // set request url and set response
         curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:1323");
- 
+
+        chunk = curl_slist_append(chunk, header);
+
+        curl_easy_setopt(curl, CURLOPT_HEADER, 1);
+
         /* Now specify we want to POST data */ 
-        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POST, 1);
 
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_field);
 
@@ -259,14 +263,14 @@ check_authorize(ngx_http_request_t* r, char *header)
         curl_easy_setopt(curl, CURLOPT_READDATA, &response);
     
         /* get verbose debug output please */ 
-        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1L);
+        curl_easy_setopt(curl, CURLOPT_VERBOSE, 1);
 
         // set request headers
-        chunk = curl_slist_append(chunk, header);
         curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
 
         curl_code = curl_easy_perform(curl);
         if (curl_code == CURLE_OK && response.data != NULL) {
+            printf("response = %s\n", response.data);
             // get response json and check
             cJSON* parse = cJSON_Parse((char *)response.data);
             cJSON* status = cJSON_GetObjectItem(parse, "status");
