@@ -216,38 +216,49 @@ ngx_http_private_image_merge_loc_conf(ngx_conf_t* cf, void* parent, void* child)
 size_t
 getResponse(void* ptr, size_t size, size_t nmemb, ngx_str_t *response) // struct string *s
 {
-    size_t new_len = response->len + size*nmemb;
-    response->data = realloc(response->data, new_len + 1);
+    size_t realsize = size * nmemb;
+    response->data = realloc(response->data, realsize + response->len + 1);
     if (response->data == NULL) {
         return NGX_ERROR;
     }
-    ngx_memcpy(response->data, ptr, size*nmemb);
-    response->data[new_len] = '\0';
-    response->len = new_len;
+    ngx_memcpy(response->data, ptr, realsize);
 
-    return size*nmemb;
+    response->len += realsize;
+    response->data[response->len] = '\0';
+
+    return realsize;
 }
 
 static ngx_int_t
-check_authorize(ngx_http_request_t* r, char *header)
+check_authorize(ngx_http_request_t* r, char *header_key)
 {
     ngx_int_t          result   = AUTHORIZE_FAIL;
     ngx_str_t          response = ngx_null_string;
     CURLcode           curl_code;
     CURL              *curl;
-    struct curl_slist *chunk    = NULL;
+    struct curl_slist *header    = NULL;
 
-    char prefix[] = "source_url=";
-    char *post_field = malloc(strlen(prefix)+r->uri.len+200);    
-    strcpy(post_field, prefix);
-    strcat(post_field, (char *)r->uri.data);
+    /* char prefix[] = "source_url="; */
+    /* char *post_field = malloc(strlen(prefix)+r->uri.len+200); */ 
+    /* strcpy(post_field, prefix); */
+    /* strcat(post_field, (char *)r->uri.data); */
+    ngx_str_t post_field = ngx_string_null;
+    ngx_str_t query_prefix = ngx_string("source_url=");
+    size_t newlen = query_prefix.len + r->uri.len;
+    post_field.data = malloc(newlen + 1);
+    memcpy(&(post_field.data[post_field.len]), r->uri.data, newlen);
+    post_field.len += newlen;
+    post_field.data[post_field.len] = 0;
 
     curl = curl_easy_init();
     if (curl) {
         // set request url and set response
         curl_easy_setopt(curl, CURLOPT_URL, "http://localhost:1323");
 
-        chunk = curl_slist_append(chunk, header);
+	// set header key
+        header = curl_slist_append(header, header_key);
+	header = curl_slist_append(header, "Accept: application/json");
+	header = curl_slist_append(header, "Content-Type: application/json");
 
         curl_easy_setopt(curl, CURLOPT_HEADER, 1);
 
@@ -257,16 +268,17 @@ check_authorize(ngx_http_request_t* r, char *header)
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_field);
 
         /* we want to use our own read function */ 
-        curl_easy_setopt(curl, CURLOPT_READFUNCTION, getResponse);
+        curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, getResponse);
     
         /* pointer to pass to our read function */ 
-        curl_easy_setopt(curl, CURLOPT_READDATA, &response);
+        curl_easy_setopt(curl, CURLOPT_WRITEDATA, &response);
     
         /* get verbose debug output please */ 
         curl_easy_setopt(curl, CURLOPT_VERBOSE, 1);
 
         // set request headers
-        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, chunk);
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header);
+	curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "POST");
 
         curl_code = curl_easy_perform(curl);
         if (curl_code == CURLE_OK && response.data != NULL) {
@@ -281,9 +293,8 @@ check_authorize(ngx_http_request_t* r, char *header)
             cJSON_free(status);
         }
 
-        free(post_field);
         curl_easy_cleanup(curl);
-        curl_slist_free_all(chunk);
+        curl_slist_free_all(header);
     }
 
     return result;
